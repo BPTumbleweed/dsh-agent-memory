@@ -272,5 +272,24 @@ console.log('8) 会话级注入：只注入本会话、剥 frontmatter、超预�
   ok('底层处理器抛错时被吞掉并记账')
 }
 
+console.log('9) 面板内联脚本必须能通过语法解析（模板字符串转义地狱的防线）')
+{
+  const store = path.join(tmp, 'store-syntax')
+  const { ctx, routes, runInject } = makeCtx({ fenced: false })
+  mod.apply(ctx, { storeRoot: store })
+  runInject()
+  const res = { statusCode: 0, setHeader() {}, end(b) { this.body = b }, writableEnded: false }
+  routes.find((r) => r.path.endsWith('/panel')).handler({ url: '/x?session=session-abc' }, res)
+  const html = String(res.body)
+  const m = html.match(/<script>([\s\S]*?)<\/script>/)
+  assert.ok(m, '面板里没有内联脚本')
+  const js = m[1]
+  // 只解析不执行：模板字符串里写错转义（\s→s、\n→真换行）在这里就会炸
+  let err = null
+  try { new Function(js) } catch (e) { err = e }
+  assert.equal(err, null, `面板内联脚本语法错误：${err && err.message}`)
+  ok(`面板内联脚本 ${js.length} 字符，语法可通过解析`)
+}
+
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log(`\n全部 ${pass} 项通过 ✅`)

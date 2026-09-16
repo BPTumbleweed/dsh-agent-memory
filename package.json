@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-memory",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH 长期记忆插件 + 配套 CLI：全局偏好（跨对话）与对话记忆（仅本会话）双层注入、实时采集、只读数据浏览与会话内面板。零运行时依赖、能力探测与熔断，面向跨版本升级设计。",
   "keywords": [
     "dsh",
