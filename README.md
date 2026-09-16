@@ -129,6 +129,35 @@ Raw messages are a **working set**: after each run the oldest records beyond `EV
 are compacted away and a line is appended to `evidence/archive.jsonl`. Nothing is lost — the
 authoritative copy is DSH's own session log, and `--rebuild` regenerates the store from it.
 
+## Two layers of memory
+
+| | global | per-conversation |
+|---|---|---|
+| file | `preferences/global.md` | `sessions/<session-id>.md` |
+| injected by | the official `agent-instructions` via `$DSH_HOME/AGENTS.md` | **this plugin**, through `agent/pre-step` |
+| scope | every conversation | only that conversation |
+| budget | 6 KB warning (`AGENTS_WARN_BYTES`) | 2 KB, truncated beyond (`sessionInjectMax`) |
+
+```bash
+# universal habits → every conversation
+python3 bin/memory-note.py "always back up before changing config" --section "干活"
+
+# only this conversation (session id defaults to $DSH_SESSION_ID)
+python3 bin/memory-note.py "this task touches CSS only" --scope session --section "约定"
+```
+
+The plugin registers a per-agent `agent/pre-step` handler, calls `next()` first so other
+plugins keep working, then inserts the session memory **before the last user message** —
+so the user's current instruction is still the last thing said. The injected message carries
+`source: { kind: "plugin", plugin: "dsh-agent-memory", form: "session-memory" }`.
+
+That hook is an internal API, so this layer is treated as the fragile one: it is feature-detected,
+wrapped in the circuit breaker, and bounded by a byte budget. If it ever stops working, the panel
+shows `sessionMemory: unavailable/tripped` and **global injection plus the store are unaffected**.
+
+Session files that have not been updated for 90 days are moved to `sessions/archive/` (never deleted),
+and `sessions/index.json` tracks size/entries/over-budget for every conversation.
+
 ## Endpoints
 
 | route | purpose |

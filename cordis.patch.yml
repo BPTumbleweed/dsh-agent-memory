@@ -16,3 +16,6 @@
         routePrefix: /dsh-agent-memory
         # 同一能力连续失败多少次后熔断（只停该能力，不影响 DSH）
         breakerThreshold: 5
+        # 单个会话记忆的注入上限（字节）。会话记忆只注入它自己那个会话；
+        # 全局偏好仍由官方 agent-instructions 注入，与本项无关。
+        sessionInjectMax: 2048

@@ -1,7 +1,7 @@
 {
   "name": "dsh-agent-memory",
-  "version": "0.1.0",
-  "description": "DSH 长期记忆插件：实时采集对话证据、只读数据浏览与工作状态面板。注入仍由官方 agent-instructions 负责，本插件不抢注入；零运行时依赖、能力探测 + 熔断，面向跨版本升级设计。",
+  "version": "0.2.0",
+  "description": "DSH 长期记忆插件 + 配套 CLI：全局偏好（跨对话）与对话记忆（仅本会话）双层注入、实时采集、只读数据浏览与会话内面板。零运行时依赖、能力探测与熔断，面向跨版本升级设计。",
   "keywords": [
     "dsh",
     "dsh-plugin",

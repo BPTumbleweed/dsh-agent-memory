@@ -82,6 +82,8 @@ EVIDENCE_KEEP = 120            # 原始消息只留最近多少条（工作集�
 SIGNALS_KEEP = 100             # 偏好信号只留最近多少条
 ARCHIVE = os.path.join(EVIDENCE, "archive.jsonl")
 AGENTS_WARN_BYTES = 6000       # 注入体警戒线：AGENTS.md 每次会话都进上下文（精简后基线约 3 KB）
+SESSION_KEEP_DAYS = 90         # 会话记忆多久没更新就归档（不删除）
+SESSION_INJECT_MAX = 2048      # 单个会话记忆注入上限（字节），插件侧同此默认
 
 # Chinese + English phrasings that usually carry a standing instruction.
 SIGNAL_RE = re.compile(
@@ -143,6 +145,13 @@ def configure(root: str | None = None, dsh_home: str | None = None,
     TOOLUSE = os.path.join(EVIDENCE, "tool-usage.json")
     DIGEST = os.path.join(MEM, "digest.md")
     ARCHIVE = os.path.join(EVIDENCE, "archive.jsonl")
+    # 全新库也能跑：把标准骨架建出来（缺目录不是错误）
+    for d in (MEM, os.path.join(MEM, "preferences"), EVIDENCE,
+              os.path.join(MEM, "sessions"), os.path.join(MEM, "journal"), INBOX):
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
 
 
 def now() -> dt.datetime:
@@ -166,6 +175,10 @@ def demote(text: str, by: int = 2) -> str:
 def write_if_changed(path: str, text: str) -> bool:
     if read_text(path) == text:
         return False
+    try:  # 目标目录可能还不存在（例如全新的 $DSH_HOME）
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except OSError:
+        pass
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
@@ -307,10 +320,10 @@ def scan(full: bool, quiet: bool) -> int:
     titles: dict[str, str] = {}
 
     if not os.path.isdir(SESS_ROOT):
-        print(f"!! 会话目录不存在: {SESS_ROOT}", file=sys.stderr)
-        return 2
+        # 没有会话日志不该让整条流水线停摆：后面的会话索引、摘要、AGENTS.md 照常生成
+        print(f"提示：会话目录不存在（{SESS_ROOT}），本轮跳过会话扫描", file=sys.stderr)
 
-    for name in sorted(os.listdir(SESS_ROOT)):
+    for name in (sorted(os.listdir(SESS_ROOT)) if os.path.isdir(SESS_ROOT) else []):
         sess_dir = os.path.join(SESS_ROOT, name)
         if not os.path.isdir(sess_dir):
             continue
@@ -472,6 +485,58 @@ def scan(full: bool, quiet: bool) -> int:
     compacted = compact_jsonl(MESSAGES, EVIDENCE_KEEP, "人类消息")
     compacted_signals = compact_jsonl(SIGNALS_JSONL, SIGNALS_KEEP, "偏好信号")
 
+    # ---- 会话记忆：维护索引 + 归档过期 --------------------------------------
+    sess_dir = os.path.join(MEM, "sessions")
+    sess_index: dict[str, dict] = {}
+    archived_sessions = 0
+    if os.path.isdir(sess_dir):
+        now_ts = now().timestamp()
+        for fname in sorted(os.listdir(sess_dir)):
+            if not fname.endswith(".md"):
+                continue
+            sid = fname[:-3]
+            fpath = os.path.join(sess_dir, fname)
+            try:
+                st = os.stat(fpath)
+                body = read_text(fpath)
+            except OSError:
+                continue
+            age_days = (now_ts - st.st_mtime) / 86400
+            if age_days > SESSION_KEEP_DAYS:
+                adir = os.path.join(sess_dir, "archive")
+                os.makedirs(adir, exist_ok=True)
+                try:
+                    os.replace(fpath, os.path.join(adir, fname))
+                    archived_sessions += 1
+                except OSError:
+                    pass
+                continue
+            title = ""
+            for line in body.split("\n")[:12]:
+                if line.startswith("title:"):
+                    title = line.split(":", 1)[1].strip()
+            created = ""
+            for line in body.split("\n")[:12]:
+                if line.startswith("created:"):
+                    created = line.split(":", 1)[1].strip()
+            sess_index[sid] = {
+                "session": sid,
+                "title": title,
+                "created": created,
+                "updated": dt.datetime.fromtimestamp(st.st_mtime).astimezone()
+                            .strftime("%Y-%m-%d"),
+                "entries": sum(1 for l in body.split("\n") if l.startswith("- ")),
+                "bytes": st.st_size,
+                "overBudget": st.st_size > SESSION_INJECT_MAX,
+            }
+        try:
+            tmp = os.path.join(sess_dir, "index.json.tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(sess_index, fh, ensure_ascii=False, indent=1, sort_keys=True)
+            os.replace(tmp, os.path.join(sess_dir, "index.json"))
+        except OSError:
+            pass
+
     # ---- per-run inbox report (only when something actually changed) ------
     os.makedirs(INBOX, exist_ok=True)
     stamp = now().strftime("%Y%m%d-%H%M")
@@ -527,7 +592,11 @@ def scan(full: bool, quiet: bool) -> int:
     # ---- digest ----------------------------------------------------------
     total_msgs = sum(1 for _ in open(MESSAGES, encoding="utf-8")) \
         if os.path.isfile(MESSAGES) else 0
-    prefs = os.path.join(MEM, "preferences", "merlin.md")
+    prefs = os.path.join(MEM, "preferences", "global.md")
+    if not os.path.isfile(prefs):
+        legacy = os.path.join(MEM, "preferences", "merlin.md")
+        if os.path.isfile(legacy):
+            prefs = legacy
     skills_idx = os.path.join(MEM, "skills", "index.md")
     # 技能只列名字（一行），不再内联整张索引表：注入体与 digest 都要保持精简。
     try:
@@ -549,9 +618,15 @@ def scan(full: bool, quiet: bool) -> int:
         # Demote headings so the embedded file nests under the digest's section.
         return re.sub(r"^(#{1,4}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ",
                       t, flags=re.MULTILINE)
-    pending = sorted(f for f in os.listdir(INBOX) if f.endswith("-scan.md"))[-1:]
-    jrn = sorted(f for f in os.listdir(os.path.join(MEM, "journal"))
-                 if f.endswith(".md"))[-1:]
+    try:
+        pending = sorted(f for f in os.listdir(INBOX) if f.endswith("-scan.md"))[-1:]
+    except OSError:
+        pending = []
+    try:
+        jrn = sorted(f for f in os.listdir(os.path.join(MEM, "journal"))
+                     if f.endswith(".md"))[-1:]
+    except OSError:
+        jrn = []
 
     # Signals newer than the last distillation are the agent's to-do list.
     last_distill = state.get("last_distill_at")
@@ -666,6 +741,8 @@ def scan(full: bool, quiet: bool) -> int:
             "evidence_total": total_msgs,
             "report": os.path.relpath(report, WS),
             "digest": os.path.relpath(DIGEST, WS),
+            "session_memories": len(sess_index),
+            "sessions_archived": archived_sessions,
             "agents_md": os.path.relpath(AGENTS_MD, WS) + (
                 "（已更新）" if agents_written else "（无变化）"),
         }, ensure_ascii=False, indent=2))

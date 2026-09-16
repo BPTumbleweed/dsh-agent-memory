@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Record one durable preference *immediately*, without waiting for the
-hourly scanner or a distillation pass.
+"""Record one durable memory *immediately*, without waiting for the scanner.
 
-    python3 agent-memory/bin/memory-note.py "改动 nginx 后必须跑一遍全量自检" \
-            --section "做事方式" --evidence "2026-09-15 session-f762df73"
+两层记忆，写入时用 `--scope` 选择：
+
+    # 全局：跨对话普适（沟通习惯、干活方式、固定约定）→ preferences/global.md
+    python3 bin/memory-note.py "改动前先备份" --section "干活"
+
+    # 会话：只对当前这个对话有用 → sessions/<会话id>.md（默认取 $DSH_SESSION_ID）
+    python3 bin/memory-note.py "这次任务只改 CSS，别动 HTML" --scope session --section "约定"
 
 What it does:
 
@@ -48,7 +52,13 @@ _DETECTED = _detect_store_from_script()
 MEM = os.path.abspath(os.path.expanduser(
     os.environ.get("AGENT_MEMORY_ROOT") or _DETECTED or os.path.join(DSH_HOME, "agent-memory")))
 WS = os.path.dirname(MEM)
-PREFS = os.path.join(MEM, "preferences", "merlin.md")
+PREFERENCES = os.path.join(MEM, "preferences")
+# 全局记忆文件：新名 global.md；老库仍叫 merlin.md 时继续沿用
+GLOBAL_MD = os.path.join(PREFERENCES, "global.md")
+LEGACY_GLOBAL_MD = os.path.join(PREFERENCES, "merlin.md")
+SESSIONS_DIR = os.path.join(MEM, "sessions")
+PREFS = GLOBAL_MD if os.path.exists(GLOBAL_MD) or not os.path.exists(LEGACY_GLOBAL_MD) \
+    else LEGACY_GLOBAL_MD
 JOURNAL_DIR = os.path.join(MEM, "journal")
 SCAN = os.path.join(MEM, "bin", "memory-scan.py")
 INLINE_SECTION = "即时记录"
@@ -65,6 +75,58 @@ def redactor():
     except Exception as exc:  # noqa: BLE001
         print(f"!! 脱敏器不可用，请勿把凭据写进备注：{exc}", file=sys.stderr)
         return None
+
+
+SESSION_HEADER = """---
+session: {sid}
+created: {when}
+updated: {when}
+entries: 0
+---
+
+# 本对话记忆
+
+> 只注入这个会话；跨对话普适的习惯见 `preferences/global.md`。
+
+## 约定
+
+"""
+
+
+def session_file(sid: str) -> str:
+    return os.path.join(SESSIONS_DIR, f"{sid}.md")
+
+
+def load_session(sid: str, when: str) -> list[str]:
+    path = session_file(sid)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().rstrip("\n").split("\n")
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    return SESSION_HEADER.format(sid=sid, when=when).rstrip("\n").split("\n")
+
+
+def touch_index(sid: str, when: str, entries: int, title: str = "") -> None:
+    """维护 sessions/index.json，供面板列出会话记忆。"""
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    idx_path = os.path.join(SESSIONS_DIR, "index.json")
+    try:
+        with open(idx_path, encoding="utf-8") as fh:
+            idx = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        idx = {}
+    rec = idx.get(sid) or {}
+    idx[sid] = {
+        "session": sid,
+        "title": title or rec.get("title") or "",
+        "created": rec.get("created") or when,
+        "updated": when,
+        "entries": entries,
+    }
+    tmp = idx_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(idx, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, idx_path)
 
 
 def bullet(text: str, when: str, evidence: str | None) -> str:
@@ -110,17 +172,27 @@ def main() -> int:
     ap.add_argument("--evidence", help="证据线索，如日期或会话短 id")
     ap.add_argument("--no-scan", action="store_true",
                     help="不刷新 digest.md")
+    ap.add_argument("--scope", choices=["global", "session"], default="global",
+                    help="global=跨对话普适（默认）；session=只对某个对话生效")
+    ap.add_argument("--session", help="会话 id（--scope session 时用；默认取 $DSH_SESSION_ID）")
     ap.add_argument("--root", help="记忆库根目录（默认 $AGENT_MEMORY_ROOT 或 $DSH_HOME/agent-memory）")
     ap.add_argument("--dsh-home", help="DSH 主目录（默认 $DSH_HOME）")
     args = ap.parse_args()
     if args.root or args.dsh_home:
-        globals()["DSH_HOME"] = os.path.abspath(os.path.expanduser(args.dsh_home or DSH_HOME))
-        globals()["MEM"] = os.path.abspath(os.path.expanduser(
+        # 重新派生的路径必须**全部**重算，漏一个就会写错地方
+        g = globals()
+        g["DSH_HOME"] = os.path.abspath(os.path.expanduser(args.dsh_home or DSH_HOME))
+        g["MEM"] = os.path.abspath(os.path.expanduser(
             args.root or os.path.join(DSH_HOME, "agent-memory")))
-        globals()["WS"] = os.path.dirname(MEM)
-        globals()["PREFS"] = os.path.join(MEM, "preferences", "merlin.md")
-        globals()["JOURNAL_DIR"] = os.path.join(MEM, "journal")
-        globals()["SCAN"] = os.path.join(MEM, "bin", "memory-scan.py")
+        g["WS"] = os.path.dirname(MEM)
+        g["PREFERENCES"] = os.path.join(MEM, "preferences")
+        g["GLOBAL_MD"] = os.path.join(PREFERENCES, "global.md")
+        g["LEGACY_GLOBAL_MD"] = os.path.join(PREFERENCES, "merlin.md")
+        g["SESSIONS_DIR"] = os.path.join(MEM, "sessions")
+        g["PREFS"] = GLOBAL_MD if os.path.exists(GLOBAL_MD) or not os.path.exists(LEGACY_GLOBAL_MD) \
+            else LEGACY_GLOBAL_MD
+        g["JOURNAL_DIR"] = os.path.join(MEM, "journal")
+        g["SCAN"] = os.path.join(MEM, "bin", "memory-scan.py")
 
     now = dt.datetime.now().astimezone()
     when = now.strftime("%Y-%m-%d")
@@ -134,12 +206,23 @@ def main() -> int:
         print("!! 内容为空", file=sys.stderr)
         return 2
 
+    scope = args.scope
+    sid = args.session or os.environ.get("DSH_SESSION_ID") or ""
+    if scope == "session" and not sid:
+        print("!! --scope session 需要 --session 或 $DSH_SESSION_ID", file=sys.stderr)
+        return 2
+    target_file = session_file(sid) if scope == "session" else PREFS
+    globals()["TARGET"] = target_file
+
     try:
-        with open(PREFS, encoding="utf-8") as fh:
-            lines = fh.read().rstrip("\n").split("\n")
+        if scope == "session":
+            lines = load_session(sid, when)
+        else:
+            with open(target_file, encoding="utf-8") as fh:
+                lines = fh.read().rstrip("\n").split("\n")
     except FileNotFoundError:
         # 全新记忆库：先立个骨架，让第一条偏好有地方落
-        os.makedirs(os.path.dirname(PREFS), exist_ok=True)
+        os.makedirs(os.path.dirname(target_file), exist_ok=True)
         lines = ["# 长期偏好（自动注入）", "",
                  "> 由 Agent 维护；口令/token/私钥不进档。", ""]
     except OSError as exc:
@@ -147,7 +230,8 @@ def main() -> int:
         return 2
 
     entry = bullet(text, when, args.evidence)
-    target = args.section or INLINE_SECTION
+    default_section = "约定" if scope == "session" else INLINE_SECTION
+    target = args.section or default_section
     lines, found = insert_into_section(lines, target, entry)
     if not found:
         if args.section:
@@ -162,10 +246,18 @@ def main() -> int:
         else:
             target = INLINE_SECTION
 
-    tmp = PREFS + ".tmp"
+    body = "\n".join(lines) + "\n"
+    if scope == "session":
+        # 更新 frontmatter 的 updated/entries
+        n_entries = sum(1 for l in lines if l.startswith("- "))
+        body = re.sub(r"^updated: .*$", f"updated: {when}", body, count=1, flags=re.M)
+        body = re.sub(r"^entries: .*$", f"entries: {n_entries}", body, count=1, flags=re.M)
+    tmp = target_file + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
-    os.replace(tmp, PREFS)
+        fh.write(body)
+    os.replace(tmp, target_file)
+    if scope == "session":
+        touch_index(sid, when, sum(1 for l in body.split("\n") if l.startswith("- ")))
 
     os.makedirs(JOURNAL_DIR, exist_ok=True)
     jpath = os.path.join(JOURNAL_DIR, now.strftime("%Y-%m.md"))
@@ -173,14 +265,17 @@ def main() -> int:
     with open(jpath, "a", encoding="utf-8") as fh:
         if new_journal:
             fh.write(f"# {now:%Y-%m} 记忆库日志\n")
-        fh.write(f"\n- {now:%Y-%m-%d %H:%M} 即时记录 → `{target}`：{text}"
+        scope_tag = f"会话 {sid[:20]}" if scope == "session" else "全局"
+        fh.write(f"\n- {now:%Y-%m-%d %H:%M} 即时记录（{scope_tag}）→ `{target}`：{text}"
                  f"{' —— ' + args.evidence if args.evidence else ''}\n")
 
     if not args.no_scan:
         subprocess.run([sys.executable, SCAN, "--quiet"], check=False)
 
     print(json.dumps({
-        "wrote": os.path.relpath(PREFS, WS),
+        "wrote": os.path.relpath(target_file, WS),
+        "scope": scope,
+        "session": sid or None,
         "section": target,
         "journal": os.path.relpath(jpath, WS),
         "entry": entry,

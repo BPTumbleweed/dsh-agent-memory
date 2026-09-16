@@ -209,8 +209,67 @@ console.log('7) 只读数据接口：白名单、形状正确、不泄露任意�
   const missing = routes.find((x) => x.path.includes('..') || x.path.includes('%'))
   assert.equal(missing, undefined, '不应注册可疑路径')
   const kinds = routes.filter((x) => x.path.startsWith('/dsh-agent-memory/data/')).length
-  assert.equal(kinds, 10, `数据接口应为 10 个白名单，实际 ${kinds}`)
-  ok('10 个白名单数据接口形状正确，且没有任意路径入口')
+  assert.equal(kinds, 12, `数据接口应为 12 个白名单，实际 ${kinds}`)
+  ok('12 个白名单数据接口形状正确（含按会话取记忆的 /data/session），且没有任意路径入口')
+}
+
+console.log('8) 会话级注入：只注入本会话、剥 frontmatter、超预算截断、出错不冒泡')
+{
+  const store = path.join(tmp, 'store-session')
+  fs.mkdirSync(path.join(store, 'sessions'), { recursive: true })
+  fs.writeFileSync(path.join(store, 'sessions', 'session-abc.md'),
+    '---\nsession: session-abc\nupdated: 2026-09-16\nentries: 1\n---\n\n# 本对话记忆\n\n## 约定\n\n- 这次只改 CSS\n')
+
+  // 捕获 agent/created，拿到"某个 agent 的 pre-step 处理器"
+  const hooks = new Map()
+  const ctx = { on: (ev, fn) => hooks.set(ev, fn), inject: () => {}, get: () => undefined, set: () => {} }
+  mod.apply(ctx, { storeRoot: store })
+
+  const perAgent = []
+  const agent = {
+    session: { id: 'session-abc' },
+    ctx: { on: (ev, fn) => perAgent.push({ ev, fn }) },
+  }
+  hooks.get('agent/created')({ agent })
+  assert.equal(perAgent.length, 1, '应给该 agent 挂 1 个 pre-step')
+  assert.equal(perAgent[0].ev, 'agent/pre-step')
+
+  const userMsg = { role: 'user', content: [{ type: 'text', text: '改一下样式' }] }
+  const next = async () => ({ kind: 'enter', messages: [userMsg] })
+  const out = await perAgent[0].fn({ agent, messages: [userMsg], signal: { aborted: false }, step: 1 }, next)
+
+  assert.equal(out.kind, 'enter')
+  assert.equal(out.messages.length, 2, '应插入一条')
+  assert.equal(out.messages[1], userMsg, '用户消息必须仍在最后')
+  const injected = out.messages[0]
+  assert.equal(injected.source.plugin, 'dsh-agent-memory')
+  assert.equal(injected.source.form, 'session-memory')
+  const text = injected.content[0].text
+  assert.ok(text.includes('这次只改 CSS'), '正文应包含会话记忆')
+  assert.ok(!text.includes('session: session-abc'), 'frontmatter 必须剥掉')
+  assert.ok(text.startsWith('[本对话记忆'), '应有归属说明')
+  ok('只在本会话注入，且插在用户消息之前、frontmatter 已剥离')
+
+  // 别的会话没有记忆文件 → 原样返回
+  const other = { session: { id: 'session-zzz' }, ctx: { on: () => {} } }
+  const out2 = await perAgent[0].fn({ agent: other, messages: [userMsg] }, next)
+  assert.equal(out2.messages.length, 1, '无会话记忆时不得插入')
+  ok('无记忆的会话不受影响')
+
+  // 超预算 → 截断并标注
+  fs.writeFileSync(path.join(store, 'sessions', 'session-big.md'), 'x'.repeat(5000))
+  const big = { session: { id: 'session-big' }, ctx: { on: () => {} } }
+  const out3 = await perAgent[0].fn({ agent: big, messages: [userMsg] }, next)
+  assert.ok(out3.messages[0].content[0].text.includes('已截断'), '超预算应截断')
+  ok('超过注入预算会被截断并标注')
+
+  // next() 抛错 → 熔断器吞掉，不向外冒泡
+  let threw = null
+  try {
+    await perAgent[0].fn({ agent, messages: [userMsg] }, async () => { throw new Error('boom') })
+  } catch (e) { threw = e }
+  assert.equal(threw, null, `不应向外抛错，实际：${threw}`)
+  ok('底层处理器抛错时被吞掉并记账')
 }
 
 fs.rmSync(tmp, { recursive: true, force: true })
