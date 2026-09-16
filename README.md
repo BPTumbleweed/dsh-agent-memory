@@ -60,6 +60,8 @@ The plugin only reads this layout; the companion CLI writes it:
 
 ```
 <storeRoot>/
+├── bin/                         companion CLI (symlink or copy the repo's bin/ here)
+├── secrets.files                optional: extra files to harvest secret values from
 ├── preferences/merlin.md        the preference set (this is what gets injected)
 ├── preferences/evidence.md      per-item provenance (not injected)
 ├── skills/index.md, *.md        reusable playbooks
@@ -73,6 +75,59 @@ The plugin only reads this layout; the companion CLI writes it:
 
 Raw messages are a **working set, not an archive**: the authoritative copy is DSH's own session
 log, so older records are compacted away and can be rebuilt from `$DSH_HOME/sessions`.
+
+## Companion CLI
+
+The panel shows real data only if something fills the store. That is what `bin/` does:
+
+```bash
+# point it at your DSH home and memory root, then do a first full backfill
+python3 bin/memory-scan.py --full --root ~/agent-memory --dsh-home ~/.dsh
+
+# record one durable preference right now (also refreshes digest.md)
+python3 bin/memory-note.py "prefers terse, evidence-backed answers" --section "沟通"
+
+# after distilling candidates, clear the pending counter
+python3 bin/memory-scan.py --mark-distilled
+```
+
+Path resolution — first match wins:
+
+| value | order |
+|---|---|
+| store root | `--root` → `$AGENT_MEMORY_ROOT` → the store the script itself sits in (`<store>/bin/…`) → `$DSH_HOME/agent-memory` |
+| DSH home | `--dsh-home` → `$DSH_HOME` → `~/.dsh` |
+| session logs | `--sessions` → `$DSH_HOME/sessions/<derived from cwd>` |
+
+The easiest wiring is to **symlink or copy `bin/` into your store** (`<store>/bin/`): the scripts
+then auto-detect the store, and the panel's copy-ready commands work as-is.
+
+Run it on a timer (5 minutes is plenty — an idle incremental scan costs ~0.2 s):
+
+```ini
+# /etc/systemd/system/agent-memory.service
+[Service]
+Type=oneshot
+User=<your-user>
+Environment=DSH_HOME=/var/lib/dsh
+WorkingDirectory=/path/to/your/project   # used to pick the right session directory
+ExecStart=/usr/bin/python3 /path/to/agent-memory/bin/memory-scan.py --quiet
+```
+
+### What the CLI does with secrets
+
+Everything written into the store passes through `bin/redact.py` first: known secret *values*
+harvested from configured files, plus structural patterns (bearer/basic headers, `token=`, cookie
+records and cookie headers, JWTs, `sk-…`, `ghp_…`, bcrypt hashes, private keys, literal
+`password=…` assignments). List extra sources in `<store>/secrets.files` (one path per line);
+each is auto-detected as a Netscape cookie jar, a `KEY=VALUE` file, or a single-token file.
+`$DSH_HOME/.credentials.yaml` is read when present. Run `python3 bin/redact.py` for its self-test.
+
+### Storage model
+
+Raw messages are a **working set**: after each run the oldest records beyond `EVIDENCE_KEEP` (120)
+are compacted away and a line is appended to `evidence/archive.jsonl`. Nothing is lost — the
+authoritative copy is DSH's own session log, and `--rebuild` regenerates the store from it.
 
 ## Endpoints
 

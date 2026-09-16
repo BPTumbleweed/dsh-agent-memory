@@ -18,6 +18,7 @@
   },
   "files": [
     "lib",
+    "bin",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -50,5 +51,8 @@
   "homepage": "https://github.com/BPTumbleweed/dsh-agent-memory#readme",
   "bugs": {
     "url": "https://github.com/BPTumbleweed/dsh-agent-memory/issues"
+  },
+  "scripts": {
+    "test": "node test/selftest.mjs && python3 bin/redact.py"
   }
 }
