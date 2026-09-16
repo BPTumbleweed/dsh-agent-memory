@@ -1,5 +1,25 @@
+# Node
 node_modules/
+dist/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本地/编辑器
 *.log
 .DS_Store
-coverage/
-dist/
+.idea/
+.vscode/
+
+# 记忆库实例数据（不要把私人记忆提交进仓库）
+secrets.files
+preferences/
+evidence/
+journal/
+inbox/
+state.json
+digest.md
