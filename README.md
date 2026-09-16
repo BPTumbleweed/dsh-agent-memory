@@ -156,10 +156,11 @@ version, so a version mismatch after an upgrade is visible at a glance.
 ## Development
 
 ```bash
-node test/selftest.mjs
+node test/selftest.mjs    # 8 checks (plugin)
+python3 bin/redact.py     # 8 checks (redaction engine)
 ```
 
-Eight checks: message filtering/dedupe, the panel, the trust fence (fail-closed), the circuit
+Plugin checks: message filtering/dedupe, the panel, the trust fence (fail-closed), the circuit
 breaker, loading with no services present, a guard asserting every value path used by the panel
 script exists in the payload, and the data-endpoint whitelist.
 
