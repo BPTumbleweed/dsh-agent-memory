@@ -1,0 +1,18 @@
+# dsh-agent-memory —— DSH bundle patch（挂载声明）
+#
+# 安装：
+#   dsh plugin --profile web add link:/path/to/dsh-agent-memory
+#   （或从 npm / github 安装：dsh plugin --profile web add dsh-agent-memory）
+# 停用：给下面的条目加 disabled: true，然后重启 dsh-web
+# 回滚：dsh plugin --profile web remove dsh-agent-memory
+#
+# 记忆库默认放在 $DSH_HOME/agent-memory；要放别处，在你的 profile patch 里用
+# `- id: dsh-agent-memory` + `config.storeRoot` 覆盖即可。
+- insert:
+    - id: dsh-agent-memory
+      name: dsh-agent-memory
+      config:
+        storeRoot: !!js dshHomePath('agent-memory')
+        routePrefix: /dsh-agent-memory
+        # 同一能力连续失败多少次后熔断（只停该能力，不影响 DSH）
+        breakerThreshold: 5

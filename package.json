@@ -1,0 +1,54 @@
+{
+  "name": "dsh-agent-memory",
+  "version": "0.1.0",
+  "description": "DSH 长期记忆插件：实时采集对话证据、只读数据浏览与工作状态面板。注入仍由官方 agent-instructions 负责，本插件不抢注入；零运行时依赖、能力探测 + 熔断，面向跨版本升级设计。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory",
+    "agent-memory"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.1.5-rc.1": "compatible"
+      }
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "author": "Kan Zheng <202309068@uibe.edu.cn>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BPTumbleweed/dsh-agent-memory.git"
+  },
+  "homepage": "https://github.com/BPTumbleweed/dsh-agent-memory#readme",
+  "bugs": {
+    "url": "https://github.com/BPTumbleweed/dsh-agent-memory/issues"
+  }
+}
