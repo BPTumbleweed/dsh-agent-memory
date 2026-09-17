@@ -81,7 +81,10 @@ LIVE_KEEP = 200                # live 文件归并后最多保留多少行（防
 EVIDENCE_KEEP = 120            # 原始消息只留最近多少条（工作集，不是档案）
 SIGNALS_KEEP = 100             # 偏好信号只留最近多少条
 ARCHIVE = os.path.join(EVIDENCE, "archive.jsonl")
-AGENTS_WARN_BYTES = 6000       # 注入体警戒线：AGENTS.md 每次会话都进上下文（精简后基线约 3 KB）
+# 注入体警戒线：AGENTS.md 每次会话都进上下文，超线就提醒精简。
+# 2026-09-17 从 6000 调至 8000：一次精简后基线 5.8 KB，6000 只剩 4% 余量，
+# 随便加一条新条目就报警，警报反而失去「该精简了」的提示意义。调高后仍余约 2.2 KB。
+AGENTS_WARN_BYTES = 8000
 SESSION_KEEP_DAYS = 90         # 会话记忆多久没更新就归档（不删除）
 SESSION_INJECT_MAX = 2048      # 单个会话记忆注入上限（字节），插件侧同此默认
 

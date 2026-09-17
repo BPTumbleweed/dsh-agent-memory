@@ -29,7 +29,10 @@ PATTERNS: list[tuple[re.Pattern, object]] = [
     (re.compile(r"(?<=token=)[A-Za-z0-9_\-]{40,}"), "<REDACTED:dsh-token>"),
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._\-]{20,}"), r"\1 <REDACTED:bearer>"),
     (re.compile(r"(?i)\b(basic)\s+[A-Za-z0-9+/=]{16,}"), r"\1 <REDACTED:basic-auth>"),
-    (re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), "<REDACTED:api-key>"),
+    # 2026-09-17 扩宽：DashScope 新版 key 形如 sk-ws-H.PHYHYHR.GzOE.<base64url>，
+    # 含 . - _ 三种符号。原规则 [A-Za-z0-9]{20,} 一个字符都匹配不上，
+    # 实测该 key 被原样采集进 agent-memory/evidence/*.jsonl。
+    (re.compile(r"\bsk-[A-Za-z0-9._\-]{16,}"), "<REDACTED:api-key>"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "<REDACTED:github-token>"),
     (re.compile(r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{40,}"), "<REDACTED:bcrypt-hash>"),
     # Cookie / Set-Cookie 头（也覆盖写在 shell 命令里的）
